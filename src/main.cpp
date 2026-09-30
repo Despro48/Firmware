@@ -45,7 +45,12 @@ void sendFrame() {
 void setup() {
 	Serial.begin(921600);
 
-	LoRa.begin(LORA_FREQ);
+	LoRa.setPins(LORA_CS, LORA_RST, LORA_DIO0);
+
+	if (LoRa.begin(LORA_FREQ) == 0) {
+		Serial.println("LoRa init failed! Check connections");
+		while (1) delay(10);
+	}
 
 	Wire.begin(I2C_SDA, I2C_SCL);
 	Wire.setClock(1000000);
