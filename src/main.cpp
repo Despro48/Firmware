@@ -19,11 +19,11 @@ Adafruit_MLX90640 mlx;
 #define LORA_FREQ 433E6
 #define LORA_SYNCWORD 0x67
 #define LORA_CODINGRATE 4
-#define LORA_SPREADINGFACTOR 6
+#define LORA_SPREADINGFACTOR 7
 #define LORA_BANDWIDTH 500E3
 #define LORA_POWER 17
 #define LORA_PREAMBLE 6
-#define LORA_GAIN 1
+#define LORA_GAIN 0
 
 #define PIXELS (32 * 24)
 #define PAYLOAD 253
@@ -53,7 +53,7 @@ void sendFrame(const float *frameData) {
 		LoRa.write(total);
 		LoRa.write((uint8_t *)line + off, n);
 		LoRa.endPacket();
-		vTaskDelay(pdMS_TO_TICKS(20));
+		vTaskDelay(pdMS_TO_TICKS(10));
 	}
 }
 
@@ -65,7 +65,7 @@ void mlxTask(void *parameter) {
 		} else {
 			Serial.println("Error reading frame");
 		}
-		vTaskDelay(pdMS_TO_TICKS(1000));
+		vTaskDelay(pdMS_TO_TICKS(20));
 	}
 }
 
@@ -113,7 +113,7 @@ void setup() {
 
 	mlx.setMode(MLX90640_CHESS);
 	mlx.setResolution(MLX90640_ADC_18BIT);
-	mlx.setRefreshRate(MLX90640_0_5_HZ);
+	mlx.setRefreshRate(MLX90640_4_HZ);
 
 	Serial.println("THERMAL CAM Initialized!");
 
