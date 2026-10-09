@@ -15,8 +15,15 @@ Adafruit_MLX90640 mlx;
 #define LORA_CS 5
 #define LORA_RST 14
 #define LORA_DIO0 26
+
 #define LORA_FREQ 433E6
 #define LORA_SYNCWORD 0x67
+#define LORA_CODINGRATE 4
+#define LORA_SPREADINGFACTOR 6
+#define LORA_BANDWIDTH 500E3
+#define LORA_POWER 17
+#define LORA_PREAMBLE 6
+#define LORA_GAIN 1
 
 #define PIXELS (32 * 24)
 #define PAYLOAD 253
@@ -81,6 +88,12 @@ void initializeLoRa() {
 	}
 
 	LoRa.setSyncWord(LORA_SYNCWORD);
+	LoRa.setCodingRate4(LORA_CODINGRATE);
+	LoRa.setSpreadingFactor(LORA_SPREADINGFACTOR);
+	LoRa.setSignalBandwidth(LORA_BANDWIDTH);
+	LoRa.setTxPower(LORA_POWER);
+	LoRa.setPreambleLength(LORA_PREAMBLE);
+	LoRa.setGain(LORA_GAIN);
 
 	Serial.printf("LoRa ready @ %.0f MHz  CS=%d RST=%d DIO0=%d\n", LORA_FREQ / 1E6,
 				LORA_CS, LORA_RST, LORA_DIO0);
