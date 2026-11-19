@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <LoRa.h>
 #include <freertos/queue.h>
+#include <string.h>
 
 Adafruit_MLX90640 mlx;
 
@@ -26,33 +27,71 @@ Adafruit_MLX90640 mlx;
 #define LORA_GAIN 0
 
 #define PIXELS (32 * 24)
-#define PAYLOAD 253
+#define PAYLOAD 252
+#define FRAME_BYTES (PIXELS * 2)
 
 float frame[PIXELS];
-char line[PIXELS * 10];
 float txFrame[PIXELS];
+uint8_t txBuffer[FRAME_BYTES];
 QueueHandle_t frameQueue;
 
-void sendFrame(const float *frameData) {
-	size_t len = 0;
-	for (int i = 0; i < PIXELS; i++) {
-		len += snprintf(
-			line + len, 
-			sizeof(line) - len, 
-			"%0.3f%c", frameData[i],
-			i < PIXELS - 1 ? ',' : '\n'
-		);
+static uint16_t floatToHalf(float value) {
+	uint32_t x;
+	memcpy(&x, &value, sizeof(x));
+
+	uint16_t sign = (uint16_t)((x >> 16) & 0x8000u);
+	uint32_t expField = (x >> 23) & 0xFFu;
+	uint32_t mantissa = x & 0x007FFFFFu;
+
+	if (expField == 0xFFu) {
+		return (uint16_t)(sign | (mantissa ? 0x7E00u : 0x7C00u));
 	}
 
-	uint8_t total = (len + PAYLOAD - 1) / PAYLOAD;
+	int32_t halfExp = (int32_t)expField - 127 + 15;
+	if (halfExp >= 0x1F) return (uint16_t)(sign | 0x7C00u);
+
+	if (halfExp <= 0) {
+		if (halfExp < -10) return sign;
+		mantissa |= 0x00800000u;
+		int shift = 14 - halfExp;
+		uint32_t result = mantissa >> shift;
+		uint32_t rem = mantissa & ((1u << shift) - 1u);
+		uint32_t halfway = 1u << (shift - 1);
+		if (rem > halfway || (rem == halfway && (result & 1u))) result++;
+		return (uint16_t)(sign | result);
+	}
+
+	uint32_t result = mantissa >> 13;
+	uint32_t rem = mantissa & 0x1FFFu;
+	if (rem > 0x1000u || (rem == 0x1000u && (result & 1u))) {
+		result++;
+		if (result == 0x400u) {
+			result = 0;
+			halfExp++;
+			if (halfExp >= 0x1F) return (uint16_t)(sign | 0x7C00u);
+		}
+	}
+
+	return (uint16_t)(sign | ((uint16_t)halfExp << 10) | result);
+}
+
+void sendFrame(const float *frameData) {
+	for (int i = 0; i < PIXELS; i++) {
+		uint16_t packed = floatToHalf(frameData[i]);
+		txBuffer[i * 2] = (uint8_t)(packed & 0xFF);
+		txBuffer[i * 2 + 1] = (uint8_t)(packed >> 8);
+	}
+
+	uint8_t total = (FRAME_BYTES + PAYLOAD - 1) / PAYLOAD;
 	for (uint8_t i = 1; i <= total; i++) {
 		Serial.printf("Transmit %d/%d\n", i, total);
-		size_t off = i * PAYLOAD;
-		size_t n = (len - off < PAYLOAD) ? len - off : PAYLOAD;
+		size_t off = (size_t)(i - 1) * PAYLOAD;
+		size_t n = FRAME_BYTES - off;
+		if (n > PAYLOAD) n = PAYLOAD;
 		LoRa.beginPacket();
 		LoRa.write(i);
 		LoRa.write(total);
-		LoRa.write((uint8_t *)line + off, n);
+		LoRa.write(txBuffer + off, n);
 		LoRa.endPacket();
 		vTaskDelay(pdMS_TO_TICKS(10));
 	}
