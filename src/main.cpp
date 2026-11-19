@@ -98,7 +98,7 @@ void sendFrame(const float *frameData) {
 		LoRa.write((uint8_t)(pixelOffset >> 8));
 		LoRa.write(txBuffer + byteOffset, n);
 		LoRa.endPacket();
-		vTaskDelay(pdMS_TO_TICKS(10));
+		vTaskDelay(pdMS_TO_TICKS(50));
 	}
 }
 
