@@ -28,7 +28,10 @@ Adafruit_MLX90640 mlx;
 
 #define PIXELS (32 * 24)
 #define PAYLOAD 252
+#define PIXELS_PER_PACKET (PAYLOAD / 2)
 #define FRAME_BYTES (PIXELS * 2)
+#define TOTAL_PACKETS ((PIXELS + PIXELS_PER_PACKET - 1) / PIXELS_PER_PACKET)
+#define LORA_HEADER 4
 
 float frame[PIXELS];
 float txFrame[PIXELS];
@@ -82,16 +85,18 @@ void sendFrame(const float *frameData) {
 		txBuffer[i * 2 + 1] = (uint8_t)(packed >> 8);
 	}
 
-	uint8_t total = (FRAME_BYTES + PAYLOAD - 1) / PAYLOAD;
-	for (uint8_t i = 1; i <= total; i++) {
-		Serial.printf("Transmit %d/%d\n", i, total);
-		size_t off = (size_t)(i - 1) * PAYLOAD;
-		size_t n = FRAME_BYTES - off;
+	for (uint8_t i = 1; i <= TOTAL_PACKETS; i++) {
+		uint16_t pixelOffset = (uint16_t)((i - 1) * PIXELS_PER_PACKET);
+		size_t byteOffset = (size_t)pixelOffset * 2;
+		size_t n = FRAME_BYTES - byteOffset;
 		if (n > PAYLOAD) n = PAYLOAD;
+		Serial.printf("Transmit %d/%d offset=%u\n", i, TOTAL_PACKETS, (unsigned)pixelOffset);
 		LoRa.beginPacket();
 		LoRa.write(i);
-		LoRa.write(total);
-		LoRa.write(txBuffer + off, n);
+		LoRa.write(TOTAL_PACKETS);
+		LoRa.write((uint8_t)(pixelOffset & 0xFF));
+		LoRa.write((uint8_t)(pixelOffset >> 8));
+		LoRa.write(txBuffer + byteOffset, n);
 		LoRa.endPacket();
 		vTaskDelay(pdMS_TO_TICKS(10));
 	}
