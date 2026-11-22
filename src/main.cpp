@@ -5,6 +5,8 @@
 #include <freertos/queue.h>
 #include <string.h>
 
+#include "thermal_codec_a.h"
+
 Adafruit_MLX90640 mlx;
 
 #define I2C_SDA 21
@@ -27,78 +29,30 @@ Adafruit_MLX90640 mlx;
 #define LORA_GAIN 0
 
 #define PIXELS (32 * 24)
-#define PAYLOAD 252
-#define PIXELS_PER_PACKET (PAYLOAD / 2)
-#define FRAME_BYTES (PIXELS * 2)
-#define TOTAL_PACKETS ((PIXELS + PIXELS_PER_PACKET - 1) / PIXELS_PER_PACKET)
-#define LORA_HEADER 4
+#define PACKET_GAP_MS 20
 
 float frame[PIXELS];
 float txFrame[PIXELS];
-uint8_t txBuffer[FRAME_BYTES];
+thermal_a::Packet txPackets[thermal_a::kMaxPackets];
 QueueHandle_t frameQueue;
 
-static uint16_t floatToHalf(float value) {
-	uint32_t x;
-	memcpy(&x, &value, sizeof(x));
-
-	uint16_t sign = (uint16_t)((x >> 16) & 0x8000u);
-	uint32_t expField = (x >> 23) & 0xFFu;
-	uint32_t mantissa = x & 0x007FFFFFu;
-
-	if (expField == 0xFFu) {
-		return (uint16_t)(sign | (mantissa ? 0x7E00u : 0x7C00u));
+void sendFrame(const float *frameData, uint8_t frameId) {
+	const int packetCount = thermal_a::encodeFrame(frameData, frameId, txPackets);
+	if (packetCount == 0) {
+		Serial.printf("Frame %u: profile-A encode failed\n", frameId);
+		return;
 	}
 
-	int32_t halfExp = (int32_t)expField - 127 + 15;
-	if (halfExp >= 0x1F) return (uint16_t)(sign | 0x7C00u);
-
-	if (halfExp <= 0) {
-		if (halfExp < -10) return sign;
-		mantissa |= 0x00800000u;
-		int shift = 14 - halfExp;
-		uint32_t result = mantissa >> shift;
-		uint32_t rem = mantissa & ((1u << shift) - 1u);
-		uint32_t halfway = 1u << (shift - 1);
-		if (rem > halfway || (rem == halfway && (result & 1u))) result++;
-		return (uint16_t)(sign | result);
-	}
-
-	uint32_t result = mantissa >> 13;
-	uint32_t rem = mantissa & 0x1FFFu;
-	if (rem > 0x1000u || (rem == 0x1000u && (result & 1u))) {
-		result++;
-		if (result == 0x400u) {
-			result = 0;
-			halfExp++;
-			if (halfExp >= 0x1F) return (uint16_t)(sign | 0x7C00u);
-		}
-	}
-
-	return (uint16_t)(sign | ((uint16_t)halfExp << 10) | result);
-}
-
-void sendFrame(const float *frameData) {
-	for (int i = 0; i < PIXELS; i++) {
-		uint16_t packed = floatToHalf(frameData[i]);
-		txBuffer[i * 2] = (uint8_t)(packed & 0xFF);
-		txBuffer[i * 2 + 1] = (uint8_t)(packed >> 8);
-	}
-
-	for (uint8_t i = 1; i <= TOTAL_PACKETS; i++) {
-		uint16_t pixelOffset = (uint16_t)((i - 1) * PIXELS_PER_PACKET);
-		size_t byteOffset = (size_t)pixelOffset * 2;
-		size_t n = FRAME_BYTES - byteOffset;
-		if (n > PAYLOAD) n = PAYLOAD;
-		Serial.printf("Transmit %d/%d offset=%u\n", i, TOTAL_PACKETS, (unsigned)pixelOffset);
+	for (int i = 0; i < packetCount; i++) {
+		Serial.printf("TX A frame=%u strip=%u part=%u k=%u len=%u%s\n", frameId,
+					txPackets[i].stripId, txPackets[i].part, txPackets[i].riceK,
+					txPackets[i].length, txPackets[i].split ? " split" : "");
 		LoRa.beginPacket();
-		LoRa.write(i);
-		LoRa.write(TOTAL_PACKETS);
-		LoRa.write((uint8_t)(pixelOffset & 0xFF));
-		LoRa.write((uint8_t)(pixelOffset >> 8));
-		LoRa.write(txBuffer + byteOffset, n);
-		LoRa.endPacket();
-		vTaskDelay(pdMS_TO_TICKS(50));
+		LoRa.write(txPackets[i].data, txPackets[i].length);
+		if (LoRa.endPacket() == 0) {
+			Serial.println("LoRa TX failed");
+		}
+		vTaskDelay(pdMS_TO_TICKS(PACKET_GAP_MS));
 	}
 }
 
@@ -116,9 +70,11 @@ void mlxTask(void *parameter) {
 
 void loraTask(void *parameter) {
 	(void)parameter;
+	uint8_t frameId = 0;
 	for (;;) {
 		if (xQueueReceive(frameQueue, txFrame, portMAX_DELAY) == pdTRUE) {
-			sendFrame(txFrame);
+			sendFrame(txFrame, frameId);
+			frameId++;
 		}
 	}
 }
